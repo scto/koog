@@ -6,20 +6,19 @@ import ai.koog.rag.base.files.FileMetadata
 import ai.koog.rag.base.files.FileSystemProvider
 
 internal suspend fun <Path> buildDirectoryTree(
-    path: Path,
     fs: FileSystemProvider.ReadOnly<Path>,
+    path: Path,
+    metadata: FileMetadata,
     maxDepth: Int,
     filter: GlobPattern? = null
 ): FileSystemEntry? {
     require(maxDepth > 0) { "The maxDepth must be greater than zero." }
 
-    val metadata = fs.metadata(path) ?: return null
-
     if (filter != null && !filter.matches(fs.name(path))) return null
 
     return when (metadata.type) {
         FileMetadata.FileType.File -> buildFileEntryForTree(fs, path, metadata)
-        FileMetadata.FileType.Directory -> buildFolderWithUnwrap(fs, path, maxDepth, filter)
+        FileMetadata.FileType.Directory -> buildFolderWithUnwrap(fs, path, metadata, maxDepth, filter)
     }
 }
 
@@ -43,30 +42,51 @@ private suspend fun <Path> buildFileEntryForTree(
 private suspend fun <Path> buildFolderWithUnwrap(
     fs: FileSystemProvider.ReadOnly<Path>,
     path: Path,
+    metadata: FileMetadata,
     maxDepth: Int,
     filter: GlobPattern?
 ): FileSystemEntry.Folder {
     val children = fs.list(path).filter { child ->
         filter == null || filter.matches(fs.name(child))
     }
-
-    return if (maxDepth == 1 && children.size != 1) {
-        FileSystemEntry.Folder(
+    if (maxDepth == 1 && children.size > 1) {
+        return FileSystemEntry.Folder(
             name = fs.name(path),
             path = fs.toAbsolutePathString(path),
-            entries = null, // Do not expand further
-            hidden = fs.metadata(path)?.hidden ?: false
-        )
-    } else {
-        val entries = children.mapNotNull { child ->
-            buildDirectoryTree(child, fs, if (children.size == 1) maxDepth else maxDepth - 1, filter)
-        }
-
-        FileSystemEntry.Folder(
-            name = fs.name(path),
-            path = fs.toAbsolutePathString(path),
-            entries = entries,
-            hidden = fs.metadata(path)?.hidden ?: false
+            entries = null,
+            hidden = metadata.hidden
         )
     }
+
+    val entries = children.mapNotNull { child ->
+        val childMeta = fs.metadata(child) ?: return@mapNotNull null
+
+        if (childMeta.type == FileMetadata.FileType.File) {
+            return@mapNotNull buildFileEntryForTree(fs, child, childMeta)
+        }
+        val nextDepth = if (shouldUnwrap(children, childMeta)) maxDepth else maxDepth - 1
+        if (nextDepth <= 0) return@mapNotNull null
+        buildDirectoryTree(
+            fs = fs,
+            path = child,
+            metadata = childMeta,
+            maxDepth = nextDepth,
+            filter = filter
+        )
+    }
+
+    return FileSystemEntry.Folder(
+        name = fs.name(path),
+        path = fs.toAbsolutePathString(path),
+        entries = entries,
+        hidden = metadata.hidden
+    )
+}
+
+/**
+ * Determines if we should unwrap (preserve depth) for single directory paths.
+ * Only unwrap if there's exactly one child AND that child is a directory.
+ */
+private fun <Path> shouldUnwrap(children: List<Path>, childMeta: FileMetadata): Boolean {
+    return children.size == 1 && childMeta.type == FileMetadata.FileType.Directory
 }
