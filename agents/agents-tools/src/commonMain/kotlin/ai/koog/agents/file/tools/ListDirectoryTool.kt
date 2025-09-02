@@ -19,24 +19,23 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 
 /**
- * Lists directory contents recursively and returns a hierarchical directory tree structure.
+ * Tool that lists directory contents as a hierarchical tree.
  *
- * This tool traverses a directory with configurable depth and optional filtering,
- * building a tree representation that includes files and subdirectories with their metadata.
- * The output is formatted as an indented tree when converted to string.
+ * Reads directory structure without modifying anything. Supports depth control
+ * and glob pattern filtering to focus on specific files.
  *
- * @param Path the filesystem path type used by the provider
- * @property fs read-only filesystem provider for accessing files and directories
+ * @param Path the filesystem path type
+ * @property fs filesystem provider for read-only directory access
  */
 public class ListDirectoryTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path>) :
     Tool<ListDirectoryTool.Args, ListDirectoryTool.Result>() {
 
     /**
-     * Specifies which directory to list and how to traverse its contents.
+     * Parameters for listing a directory.
      *
-     * @property path absolute filesystem path to the target directory to list
-     * @property depth the maximum recursion depth for traversing subdirectories (1 = immediate children only, 2 = children and grandchildren, etc.)
-     * @property filter optional glob pattern to include only matching files/directories (e.g., `*.txt`)
+     * @property path absolute path to the directory to list
+     * @property depth how many levels deep to traverse (1 = direct children only, 2 = include subdirectories, etc.)
+     * @property filter glob pattern to match specific files/folders (e.g., "*.kt" for Kotlin files)
      */
     @Serializable
     public data class Args(
@@ -46,46 +45,32 @@ public class ListDirectoryTool<Path>(private val fs: FileSystemProvider.ReadOnly
     ) : ToolArgs
 
     /**
-     * Contains the successfully listed directory tree structure.
+     * The directory listing result containing a tree of files and folders.
      *
-     * The result wraps a [FileSystemEntry.Folder] representing the root directory with:
-     * - All child files and subdirectories up to the specified depth
-     * - File metadata (name, extension, path, size, content type, hidden status)
-     * - Directory metadata (name, path, hidden status)
-     * - Single-entry directories automatically unwrapped for cleaner output
+     * Contains a [FileSystemEntry.Folder] representing the listed directory
+     * with all its contents organized hierarchically.
      *
-     * When converted to string, it produces an indented tree representation showing the hierarchy.
-     *
-     * @property root the root directory entry containing the complete tree structure
+     * @property root the directory tree starting from the requested path
      */
     @Serializable
     public data class Result(val root: FileSystemEntry.Folder) : ToolResult.JSONSerializable<Result> {
         override fun getSerializer(): KSerializer<Result> = serializer()
 
         /**
-         * Converts the directory tree to an indented text representation.
+         * Formats the tree as indented text for display.
          *
-         * The output format shows:
-         * - Files: `path (size, lines, hidden if applicable)`
-         * - Directories: `path/` with "(hidden)" marker if applicable
-         * - Each level indented with 2 spaces to show hierarchy
-         * - Single-entry directories automatically collapsed/unwrapped for readability
+         * Shows files with size/line counts and marks hidden files.
+         * Directories end with `/` and indent increases by 2 spaces per level.
          *
-         * Example output:
+         * Example:
          * ```
-         * /home/user/project/
-         *   README.md (2.0 KiB, 45 lines)
+         * /project/
          *   src/
-         *     main/
-         *       kotlin/
-         *         Main.kt (1.5 KiB, 30 lines)
-         *         Utils.kt (0.8 KiB, 20 lines)
-         *     test/kotlin/MainTest.kt (0.5 KiB, 15 lines)
-         *   build.gradle.kts (1.2 KiB, 25 lines)
-         *   .gitignore (0.2 KiB, 8 lines, hidden)
+         *     Main.kt (1.5 KiB, 42 lines)
+         *     Utils.kt (0.8 KiB, 28 lines)
+         *   README.md (2.1 KiB, 67 lines)
+         *   .gitignore (0.1 KiB, 12 lines, hidden)
          * ```
-         *
-         * @return formatted directory tree as indented text
          */
         override fun toStringDefault(): String = text { folder(root) }
     }
@@ -94,29 +79,21 @@ public class ListDirectoryTool<Path>(private val fs: FileSystemProvider.ReadOnly
     override val descriptor: ToolDescriptor = Companion.descriptor
 
     /**
-     * Lists directory contents with optional recursion and filtering.
+     * Lists the directory and returns its contents as a tree.
      *
-     * Validates that the path exists and is a directory, then builds a hierarchical tree structure.
-     * Applies optional glob pattern filtering to include only matching files and directories.
-     *
-     * @param args arguments specifying the directory path, depth, and optional filter
-     * @return [Result] containing the directory with its contents and metadata
-     * @throws [ToolException.ValidationFailure] if has invalid depth, the path doesn't exist, is not a directory,
-     * or all contents are filtered out by the glob pattern
+     * @param args the directory path, depth, and optional filter
+     * @return tree structure of the directory contents
+     * @throws ToolException.ValidationFailure if a path doesn't exist, isn't a directory,
+     *         depth is invalid, or filter matches nothing
      */
     override suspend fun execute(args: Args): Result {
-        validate(args.depth > 0) { "The maximum recursion depth must be greater than zero." }
+        validate(args.depth > 0) { "Depth must be at least 1 (got ${args.depth})" }
 
         val path = fs.fromAbsolutePathString(args.path)
-        validate(fs.exists(path)) {
-            "Path ${args.path} does not exist. " +
-                "Please ensure you provide an absolute path to a valid directory."
-        }
+        val metadata = validateNotNull(fs.metadata(path)) { "Path does not exist: ${args.path}" }
 
-        val metadata = validateNotNull(fs.metadata(path)) { "Cannot read metadata: ${args.path}" }
         validate(metadata.type == FileMetadata.FileType.Directory) {
-            "Path ${args.path} must be a directory. " +
-                "Provided path points to a file."
+            "Path is not a directory: ${args.path} (it's a ${metadata.type})"
         }
 
         val entry = buildDirectoryTree(
@@ -124,16 +101,11 @@ public class ListDirectoryTool<Path>(private val fs: FileSystemProvider.ReadOnly
             start = path,
             startMetadata = metadata,
             maxDepth = args.depth,
-            filter = if (args.filter != null) {
-                GlobPattern.compile(pattern = args.filter, caseSensitive = false)
-            } else {
-                null
-            }
+            filter = args.filter?.let { GlobPattern.compile(it, caseSensitive = false) }
         )
 
         validate(entry != null) {
-            "Directory ${args.path} is filtered out by the provided glob pattern '${args.filter}'. " +
-                "No matching files or directories found."
+            "No files or directories match the pattern '${args.filter}' in ${args.path}"
         }
 
         return Result(entry as FileSystemEntry.Folder)
@@ -143,35 +115,31 @@ public class ListDirectoryTool<Path>(private val fs: FileSystemProvider.ReadOnly
         public val descriptor: ToolDescriptor = ToolDescriptor(
             name = "__list_directory__",
             description = """
-                Browse and explore directory contents without making changes.
+                Lists files and subdirectories in a directory. READ-ONLY - never modifies anything.
                 
-                When to use:
-                - To understand project structure
-                - To find existing files
-                - To check what is in a directory before creating new files
+                Use this to:
+                - See what files exist before reading or creating
+                - Understand project structure
+                - Find specific files with patterns
                 
-                Output:
-                A hierarchical tree view with file sizes and metadata.
-                
-                Guarantees:
-                This is a read-only operation. It never creates, modifies, or deletes anything.
+                Returns a tree showing all contents with sizes and metadata.
             """.trimIndent(),
             requiredParameters = listOf(
                 ToolParameterDescriptor(
                     name = "path",
-                    description = "Absolute filesystem path to the directory you want to explore",
+                    description = "Absolute path to the directory you want to list (e.g., /home/user/project)",
                     type = ToolParameterType.String
                 )
             ),
             optionalParameters = listOf(
                 ToolParameterDescriptor(
                     name = "depth",
-                    description = "How deep to traverse subdirectories (1=immediate children only, 2=grandchildren too, etc.). Default: 1",
+                    description = "How many levels deep to go. 1 = only direct contents, 2 = include subdirectories, etc. Default is 1",
                     type = ToolParameterType.Integer
                 ),
                 ToolParameterDescriptor(
                     name = "filter",
-                    description = "Glob pattern to show only matching files/directories (e.g., '*.kt', '*.json', 'test*')",
+                    description = "Pattern to match files/folders. Examples: '*.txt' for text files, '**/*.kt' for all Kotlin files at any depth",
                     type = ToolParameterType.String
                 )
             )
