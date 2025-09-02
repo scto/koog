@@ -3,11 +3,20 @@ package ai.koog.agents.features.sql.providers
 import ai.koog.agents.snapshot.feature.AgentCheckpointData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.datetime.Clock
-import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.Column
+import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
+import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.Transaction
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.deleteWhere
+import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.sql.upsert
 import org.jetbrains.exposed.sql.vendors.H2Dialect
 import org.jetbrains.exposed.sql.vendors.MysqlDialect
 import org.jetbrains.exposed.sql.vendors.PostgreSQLDialect
@@ -96,7 +105,8 @@ public abstract class ExposedPersistencyStorageProvider(
     persistenceId = persistenceId,
     tableName = tableName,
     ttlSeconds = ttlSeconds
-), AutoCloseable {
+),
+    AutoCloseable {
 
     /**
      * The Exposed table definition for checkpoints.
