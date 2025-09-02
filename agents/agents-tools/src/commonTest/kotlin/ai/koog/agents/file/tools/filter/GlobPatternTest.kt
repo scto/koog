@@ -24,6 +24,15 @@ class GlobPatternTest {
     }
 
     @Test
+    fun testDirectoryPathMatching() {
+        val pattern = GlobPattern.compile("src/**/kotlin")
+        assertTrue(pattern.matches("src/main/kotlin"))
+        assertTrue(pattern.matches("src/test/kotlin"))
+        assertFalse(pattern.matches("test/src/kotlin"))
+        assertFalse(pattern.matches("src/main/java"))
+    }
+
+    @Test
     fun testWildcardMatching() {
         val pattern = GlobPattern.compile("test-?.txt")
         assertTrue(pattern.matches("test-1.txt"))
