@@ -11,22 +11,23 @@ package ai.koog.agents.file.tools.filter
  * - [!abc] matches any character not in the set
  * - {a,b,c} matches any of the alternatives a, b, or c
  */
-internal class GlobPattern private constructor(pattern: String, caseSensitive: Boolean = true) {
+public class GlobPattern private constructor(pattern: String, caseSensitive: Boolean = true) {
     private val regex: Regex = convertGlobToRegex(pattern, caseSensitive)
 
-    fun matches(path: String): Boolean = regex.matches(path)
+    public fun matches(path: String): Boolean = regex.matches(path)
 
-    companion object {
-        val ANY = compile("**", caseSensitive = false)
+    public companion object {
+        public val ANY: GlobPattern = compile("**", caseSensitive = false)
 
-        fun compile(pattern: String, caseSensitive: Boolean = true): GlobPattern = GlobPattern(pattern, caseSensitive)
+        public fun compile(pattern: String, caseSensitive: Boolean = true): GlobPattern =
+            GlobPattern(pattern, caseSensitive)
 
         private fun convertGlobToRegex(glob: String, caseSensitive: Boolean): Regex {
             val escaped = glob.escape()
             // First, preserve alternatives by replacing them with a placeholder
             val alternatives = mutableListOf<String>()
             // Modified regex pattern with double escaping for curly braces
-            val withPlaceholders = escaped.replace(Regex("\\{([^\\}]+)\\}")) { matchResult ->
+            val withPlaceholders = escaped.replace(Regex("\\{([^}]+)}")) { matchResult ->
                 val altGroup = matchResult.groupValues[1]
                 alternatives.add(altGroup)
                 "\$ALT${alternatives.size - 1}\$"
