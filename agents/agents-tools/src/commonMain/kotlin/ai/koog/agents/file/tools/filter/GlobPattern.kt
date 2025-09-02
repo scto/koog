@@ -45,7 +45,7 @@ public class GlobPattern private constructor(pattern: String, caseSensitive: Boo
             // First, preserve alternatives by replacing them with a placeholder
             val alternatives = mutableListOf<String>()
             // Modified regex pattern with double escaping for curly braces
-            val withPlaceholders = escaped.replace(Regex("\\{([^}]+)}")) { matchResult ->
+            val withPlaceholders = escaped.replace(Regex("\\{([^\\}]+)\\}")) { matchResult ->
                 val altGroup = matchResult.groupValues[1]
                 alternatives.add(altGroup)
                 "\$ALT${alternatives.size - 1}$"
