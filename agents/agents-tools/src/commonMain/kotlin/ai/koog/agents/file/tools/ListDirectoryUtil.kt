@@ -30,7 +30,7 @@ private suspend fun <Path> buildFileEntryForTree(
     val name = fs.name(path)
     return FileSystemEntry.File(
         name = name,
-        extension = extractExtension(name),
+        extension = fs.extension(path),
         path = fs.toAbsolutePathString(path),
         content = FileSystemEntry.File.Content.None,
         size = buildFileSize(fs, path),
