@@ -3,10 +3,8 @@ package ai.koog.agents.file.tools
 import ai.koog.agents.core.tools.DirectToolCallsEnabler
 import ai.koog.agents.core.tools.ToolException
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
-import ai.koog.agents.file.tools.model.FileSystemEntry
 import ai.koog.rag.base.files.JVMFileSystemProvider
 import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -15,8 +13,8 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.createFile
 import kotlin.io.path.writeText
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @OptIn(InternalAgentToolsApi::class)
 class ListDirectoryToolJvmTest {
@@ -71,37 +69,449 @@ class ListDirectoryToolJvmTest {
     }
 
     @Test
-    fun `lists directory tree and renders text`() = runBlocking {
-        val d = createDir("project").also {
-            it.resolve("README.md").createFile().writeText("hello\nworld")
-            val src = it.resolve("src").createDirectories()
-            val main = src.resolve("main").createDirectories()
-            val kotlin = main.resolve("kotlin").createDirectories()
-            kotlin.resolve("Main.kt").createFile().writeText("fun main(){}\n")
-        }
+    fun `empty directory shows only root`() = runBlocking {
+        // Structure:
+        // empty/ (empty directory)
+        val empty = createDir("empty")
 
-        val result = list(d, depth = 3)
-        val root = result.root
-        assertIs<FileSystemEntry.Folder>(root)
+        val result = list(empty, depth = 1)
+        val text = result.toStringDefault().trim()
 
-        val text = result.toStringDefault()
-        assertTrue(text.contains(d.toAbsolutePath().toString()))
-        assertTrue(text.contains("README.md"))
-        assertTrue(text.contains("src"))
+        // Expected: /path/to/empty/
+        val expectedText = "${empty.toAbsolutePath()}/"
+
+        assertEquals(expectedText, text)
     }
 
     @Test
-    fun `filter is applied`() = runBlocking {
-        val d = createDir("filt.txt")
-        d.resolve("a.md").createFile().writeText("a")
-        d.resolve("b.txt").createFile().writeText("b")
-        val result = list(d, depth = 2, filter = "*.txt")
-        val names = requireNotNull(result.root.entries).map {
-            when (it) {
-                is FileSystemEntry.File -> it.name
-                is FileSystemEntry.Folder -> it.name
-            }
-        }.toSet()
-        assertEquals(setOf("b.txt"), names)
+    fun `single file in directory shows collapsed file`() = runBlocking {
+        // Structure:
+        // project/
+        // └── README.md
+        val dir = createDir("project")
+        val readmeFile = dir.resolve("README.md").createFile().apply { writeText("hello world") }
+
+        val result = list(dir, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/README.md (<0.1 KiB, 1 line)
+        val expectedText = "${readmeFile.toAbsolutePath()} (<0.1 KiB, 1 line)"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `multiple files in directory shows folder with indented files`() = runBlocking {
+        // Structure:
+        // project/
+        // ├── LICENSE.txt
+        // └── README.md
+        val dir = createDir("project")
+        dir.resolve("README.md").createFile().writeText("hello") // 5 bytes
+        dir.resolve("LICENSE.txt").createFile().writeText("MIT") // 3 bytes
+
+        val result = list(dir, depth = 2)
+        val text = result.toStringDefault().trim()
+
+        // Expected:
+        // /path/to/project/
+        //   LICENSE.txt (<0.1 KiB, 1 line)
+        //   README.md (<0.1 KiB, 1 line)
+        val expectedText = """
+            ${dir.toAbsolutePath()}/
+              LICENSE.txt (<0.1 KiB, 1 line)
+              README.md (<0.1 KiB, 1 line)
+        """.trimIndent()
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `single directory shows collapsed empty directory`() = runBlocking {
+        // Structure:
+        // root/
+        // └── src/ (empty)
+        val root = createDir("root")
+        val srcDir = root.resolve("src").createDirectories()
+
+        val result = list(root, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/root/src/
+        val expectedText = "${srcDir.toAbsolutePath()}/"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `multiple directories shows root only with depth 1`() = runBlocking {
+        // Structure:
+        // root/
+        // ├── src/
+        // └── test/
+        val root = createDir("root")
+        root.resolve("src").createDirectories()
+        root.resolve("test").createDirectories()
+
+        val result = list(root, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/root/
+        val expectedText = "${root.toAbsolutePath()}/"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `unwrapping chain directories with depth 1 shows final file`() = runBlocking {
+        // Structure:
+        // project/
+        // └── src/
+        //     └── main/
+        //         └── kotlin/
+        //             └── Main.kt
+        val project = createDir("project")
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        val mainFile = kotlin.resolve("Main.kt").createFile().apply { writeText("fun main() {}") }
+
+        val result = list(project, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/src/main/kotlin/Main.kt (<0.1 KiB, 1 line)
+        val expectedText = "${mainFile.toAbsolutePath()} (<0.1 KiB, 1 line)"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `unwrapping stops at multiple files with depth 1`() = runBlocking {
+        // Structure:
+        // project/
+        // └── src/
+        //     └── main/
+        //         └── kotlin/
+        //             ├── Main.kt
+        //             └── Utils.kt
+        val project = createDir("project")
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        kotlin.resolve("Main.kt").createFile().writeText("fun main() {}")
+        kotlin.resolve("Utils.kt").createFile().writeText("class Utils")
+
+        val result = list(project, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/src/main/kotlin/
+        val expectedText = "${kotlin.toAbsolutePath()}/"
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `unwrapping stops at mixed files and directories`() = runBlocking {
+        // Structure:
+        // project/
+        // └── src/
+        //     └── main/
+        //         └── kotlin/
+        //             ├── Main.kt
+        //             └── utils/
+        val project = createDir("project")
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        kotlin.resolve("Main.kt").createFile().writeText("fun main() {}")
+        kotlin.resolve("utils").createDirectories()
+
+        val result = list(project, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/src/main/kotlin/
+        val expectedText = "${kotlin.toAbsolutePath()}/"
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `multiple entries at root level prevents unwrapping`() = runBlocking {
+        // Structure:
+        // project/
+        // ├── README.md
+        // └── src/
+        //     └── main/
+        //         └── kotlin/
+        //             └── Main.kt
+        //
+        // Unwrap: project/ (stops - multiple root entries)
+        val project = createDir("project")
+        project.resolve("README.md").createFile().writeText("readme")
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        kotlin.resolve("Main.kt").createFile().writeText("fun main() {}")
+
+        val result = list(project, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/
+        val expectedText = "${project.toAbsolutePath()}/"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `unwrapping with multiple empty directories in chain`() = runBlocking {
+        // Structure:
+        // project/
+        // └── a/
+        //     └── b/
+        //         └── c/
+        //             └── d/ (empty)
+        val project = createDir("project")
+        val a = project.resolve("a").createDirectories()
+        val b = a.resolve("b").createDirectories()
+        val c = b.resolve("c").createDirectories()
+        val d = c.resolve("d").createDirectories()
+
+        val result = list(project, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/a/b/c/d/
+        val expectedText = "${d.toAbsolutePath()}/"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `unwrapping with multiple files shows them at higher depth`() = runBlocking {
+        // Structure:
+        // project/
+        // └── src/
+        //     └── main/
+        //         └── kotlin/
+        //             ├── Main.kt
+        //             └── Utils.kt
+        val project = createDir("project")
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        kotlin.resolve("Main.kt").createFile().writeText("fun main() {}")
+        kotlin.resolve("Utils.kt").createFile().writeText("class Utils")
+
+        val result = list(project, depth = 2)
+        val text = result.toStringDefault().trim()
+
+        // Expected:
+        // /path/to/project/src/main/kotlin/
+        //   Main.kt (<0.1 KiB, 1 line)
+        //   Utils.kt (<0.1 KiB, 1 line)
+        val expectedText = """
+            ${kotlin.toAbsolutePath()}/
+              Main.kt (<0.1 KiB, 1 line)
+              Utils.kt (<0.1 KiB, 1 line)
+        """.trimIndent()
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `high depth shows full nested structure`() = runBlocking {
+        // Structure:
+        // project/
+        // ├── README.md
+        // └── src/
+        //     └── main/
+        //         └── kotlin/
+        //             └── Main.kt
+        val project = createDir("project")
+        project.resolve("README.md").createFile().writeText("hello\nworld")
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        kotlin.resolve("Main.kt").createFile().writeText("fun main(){}\n")
+
+        val result = list(project, depth = 4)
+        val text = result.toStringDefault().trim()
+
+        // Expected:
+        // /path/to/project/
+        //   README.md (<0.1 KiB, 2 lines)
+        //   src/main/kotlin/Main.kt (<0.1 KiB, 1 line)
+        val expectedText = """
+            ${project.toAbsolutePath()}/
+              README.md (<0.1 KiB, 2 lines)
+              src/main/kotlin/Main.kt (<0.1 KiB, 1 line)
+        """.trimIndent()
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `filter shows only matching files collapsed`() = runBlocking {
+        // Structure:
+        // project/
+        // ├── Main.java
+        // ├── Main.kt
+        // └── README.md
+        val dir = createDir("project")
+        val mainKtFile = dir.resolve("Main.kt").createFile().apply { writeText("kotlin") }
+        dir.resolve("Main.java").createFile().writeText("java")
+        dir.resolve("README.md").createFile().writeText("readme")
+
+        val result = list(dir, depth = 1, filter = "*.kt")
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/Main.kt (<0.1 KiB, 1 line)
+        val expectedText = "${mainKtFile.toAbsolutePath()} (<0.1 KiB, 1 line)"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `shallow filter with deeper files throws ValidationFailure`(): Unit = runBlocking {
+        // Structure:
+        // project/
+        // └── src/
+        //     └── main/
+        //         └── kotlin/
+        //             ├── Main.kt
+        //             └── Utils.java
+        val project = createDir("project")
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        kotlin.resolve("Main.kt").createFile().writeText("fun main() {}")
+        kotlin.resolve("Utils.java").createFile().writeText("class Utils {}")
+
+        assertThrows<ToolException.ValidationFailure> {
+            list(project, depth = 2, filter = "*/*.kt")
+        }
+    }
+
+    @Test
+    fun `filter with multiple matching files shows indented structure`() = runBlocking {
+        // Structure:
+        // project/
+        // └── src/
+        //     ├── Main.kt
+        //     ├── Test.java
+        //     └── Utils.kt
+        val project = createDir("project")
+        val src = project.resolve("src").createDirectories()
+        src.resolve("Main.kt").createFile().writeText("main")
+        src.resolve("Utils.kt").createFile().writeText("utils")
+        src.resolve("Test.java").createFile().writeText("test")
+
+        val result = list(project, depth = 2, filter = "*/*.kt")
+        val text = result.toStringDefault().trim()
+
+        // Expected:
+        // /path/to/project/src/
+        //   Main.kt (<0.1 KiB, 1 line)
+        //   Utils.kt (<0.1 KiB, 1 line)
+        val expectedText = """
+            ${src.toAbsolutePath()}/
+              Main.kt (<0.1 KiB, 1 line)
+              Utils.kt (<0.1 KiB, 1 line)
+        """.trimIndent()
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `filter matches files by name pattern`() = runBlocking {
+        // Structure:
+        // project/
+        // ├── src/
+        // │   └── Main.kt
+        // └── test/
+        //     ├── TestMain.kt  # This will match "Test*" pattern
+        //     └── helper.kt
+        val project = createDir("project")
+        val testDir = project.resolve("test").createDirectories()
+        val testMainFile = testDir.resolve("TestMain.kt").createFile().apply { writeText("test") }
+        testDir.resolve("helper.kt").createFile().writeText("helper")
+        val srcDir = project.resolve("src").createDirectories()
+        srcDir.resolve("Main.kt").createFile().writeText("main")
+
+        val result = list(project, depth = 2, filter = "*/Test*")
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/test/TestMain.kt (<0.1 KiB, 1 line)
+        val expectedText = "${testMainFile.toAbsolutePath()} (<0.1 KiB, 1 line)"
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `complex nested structure with mixed content`() = runBlocking {
+        // Structure:
+        // project/
+        // ├── README.md
+        // └── src/
+        //     ├── main/
+        //     │   └── kotlin/
+        //     │       └── com/
+        //     │           └── example/
+        //     │               ├── Main.kt
+        //     │               └── Utils.kt
+        //     └── test/
+        //         └── TestUtils.kt
+        val project = createDir("project")
+        project.resolve("README.md").createFile().writeText("project readme") // 14 bytes
+
+        val src = project.resolve("src").createDirectories()
+        val main = src.resolve("main").createDirectories()
+        val kotlin = main.resolve("kotlin").createDirectories()
+        val com = kotlin.resolve("com").createDirectories()
+        val example = com.resolve("example").createDirectories()
+        example.resolve("Main.kt").createFile().writeText("fun main() {}") // 13 bytes
+        example.resolve("Utils.kt").createFile().writeText("class Utils") // 11 bytes
+
+        val test = src.resolve("test").createDirectories()
+        test.resolve("TestUtils.kt").createFile().writeText("test") // 4 bytes
+
+        val result = list(project, depth = 3)
+        val text = result.toStringDefault().trim()
+
+        // Expected:
+        // /path/to/project/
+        //   README.md (<0.1 KiB, 1 line)
+        //   src/
+        //     main/kotlin/com/example/
+        //     test/TestUtils.kt (<0.1 KiB, 1 line)
+        val expectedText = """
+            ${project.toAbsolutePath()}/
+              README.md (<0.1 KiB, 1 line)
+              src/
+                main/kotlin/com/example/
+                test/TestUtils.kt (<0.1 KiB, 1 line)
+        """.trimIndent()
+
+        assertEquals(expectedText, text)
+    }
+
+    @Test
+    fun `unwrapping stops at first branching point`() = runBlocking {
+        // Structure:
+        // project/
+        // └── a/
+        //     └── b/
+        //         ├── c1/
+        //         └── c2/
+        val project = createDir("project")
+        val a = project.resolve("a").createDirectories()
+        val b = a.resolve("b").createDirectories()
+        b.resolve("c1").createDirectories()
+        b.resolve("c2").createDirectories()
+
+        val result = list(project, depth = 1)
+        val text = result.toStringDefault().trim()
+
+        // Expected: /path/to/project/a/b/
+        val expectedText = "${b.toAbsolutePath()}/"
+
+        assertEquals(expectedText, text)
     }
 }

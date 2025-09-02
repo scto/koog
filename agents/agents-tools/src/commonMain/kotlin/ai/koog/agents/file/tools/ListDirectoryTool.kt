@@ -121,8 +121,8 @@ public class ListDirectoryTool<Path>(private val fs: FileSystemProvider.ReadOnly
 
         val entry = buildDirectoryTree(
             fs = fs,
-            path = path,
-            metadata = metadata,
+            start = path,
+            startMetadata = metadata,
             maxDepth = args.depth,
             filter = if (args.filter != null) {
                 GlobPattern.compile(pattern = args.filter, caseSensitive = false)
