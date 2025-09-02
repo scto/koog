@@ -10,15 +10,33 @@ package ai.koog.agents.file.tools.filter
  * - \[abc\] matches any character in the set
  * - [!abc] matches any character not in the set
  * - {a,b,c} matches any of the alternatives a, b, or c
+ *
+ * @property regex the compiled regular expression used for matching
  */
 public class GlobPattern private constructor(pattern: String, caseSensitive: Boolean = true) {
     private val regex: Regex = convertGlobToRegex(pattern, caseSensitive)
 
+    /**
+     * Tests if the given path matches this glob pattern.
+     *
+     * @param path the file system path to test, using `/` as separator
+     * @return `true` if the path matches the pattern, `false` otherwise
+     */
     public fun matches(path: String): Boolean = regex.matches(path)
 
     public companion object {
+        /**
+         * A pattern that matches any path.
+         */
         public val ANY: GlobPattern = compile("**", caseSensitive = false)
 
+        /**
+         * Converts a glob pattern string into a [GlobPattern] matcher.
+         *
+         * @param pattern the glob pattern string to compile
+         * @param caseSensitive whether the pattern matching should be case-sensitive (default: `true`)
+         * @return A compiled [GlobPattern] ready for matching paths
+         */
         public fun compile(pattern: String, caseSensitive: Boolean = true): GlobPattern =
             GlobPattern(pattern, caseSensitive)
 
@@ -30,14 +48,14 @@ public class GlobPattern private constructor(pattern: String, caseSensitive: Boo
             val withPlaceholders = escaped.replace(Regex("\\{([^}]+)}")) { matchResult ->
                 val altGroup = matchResult.groupValues[1]
                 alternatives.add(altGroup)
-                "\$ALT${alternatives.size - 1}\$"
+                "\$ALT${alternatives.size - 1}$"
             }
 
             // Then convert glob to regex
             val regexPattern = withPlaceholders
-                .replace("**", "\$DOUBLE_STAR\$")
+                .replace("**", "\$DOUBLE_STAR$")
                 .replace("*", "[^/]*")
-                .replace("\$DOUBLE_STAR\$", ".*")
+                .replace("\$DOUBLE_STAR$", ".*")
                 .replace("?", ".")
 
             // Handle leading **/ pattern
@@ -51,7 +69,7 @@ public class GlobPattern private constructor(pattern: String, caseSensitive: Boo
             // Finally, restore alternatives
             val finalPattern = alternatives.foldIndexed(finalRegexPattern) { index, pattern, alts ->
                 pattern.replace(
-                    "\$ALT$index\$",
+                    "\$ALT$index$",
                     "(" + alts.split(",").joinToString("|") { Regex.escape(it) } + ")"
                 )
             }
