@@ -50,29 +50,17 @@ object SQLPersistentAgentExample {
             ttlSeconds = 3600 // 1 hour TTL
         )
 
-        try {
-            // Initialize schema
-            provider.initializeSchema()
+        // Initialize schema
+        provider.initializeSchema()
 
-            // Create and save checkpoint
-            val checkpoint = createSampleCheckpoint("postgres-checkpoint-1")
-            provider.saveCheckpoint(checkpoint)
-            println("Saved checkpoint: ${checkpoint.checkpointId}")
+        // Create and save checkpoint
+        val checkpoint = createSampleCheckpoint("postgres-checkpoint-1")
+        provider.saveCheckpoint(checkpoint)
+        println("Saved checkpoint: ${checkpoint.checkpointId}")
 
-            // Retrieve checkpoint
-            val retrieved = provider.getLatestCheckpoint()
-            println("Retrieved latest checkpoint: ${retrieved?.checkpointId}")
-
-            // Show pool stats if available
-            provider.getPoolStats()?.let { stats ->
-                println("\nConnection Pool Stats:")
-                println("  Active: ${stats.activeConnections}")
-                println("  Idle: ${stats.idleConnections}")
-                println("  Utilization: ${stats.utilizationPercent}%")
-            }
-        } finally {
-            provider.close()
-        }
+        // Retrieve checkpoint
+        val retrieved = provider.getLatestCheckpoint()
+        println("Retrieved latest checkpoint: ${retrieved?.checkpointId}")
     }
 
     /**
@@ -89,33 +77,29 @@ object SQLPersistentAgentExample {
             password = "agent_pass",
             ttlSeconds = 7200 // 2 hours TTL
         )
+        // Initialize schema
+        provider.initializeSchema()
 
-        try {
-            // Initialize schema
-            provider.initializeSchema()
+        // Save multiple checkpoints
+        val checkpoints = listOf(
+            createSampleCheckpoint("mysql-checkpoint-1"),
+            createSampleCheckpoint("mysql-checkpoint-2"),
+            createSampleCheckpoint("mysql-checkpoint-3")
+        )
 
-            // Save multiple checkpoints
-            val checkpoints = listOf(
-                createSampleCheckpoint("mysql-checkpoint-1"),
-                createSampleCheckpoint("mysql-checkpoint-2"),
-                createSampleCheckpoint("mysql-checkpoint-3")
-            )
-
-            checkpoints.forEach { checkpoint ->
-                provider.saveCheckpoint(checkpoint)
-                println("Saved: ${checkpoint.checkpointId}")
-            }
-
-            // Get all checkpoints
-            val allCheckpoints = provider.getCheckpoints()
-            println("\nTotal checkpoints: ${allCheckpoints.size}")
-
-            // Get checkpoint count
-            val count = provider.getCheckpointCount()
-            println("Checkpoint count: $count")
-        } finally {
-            provider.close()
+        checkpoints.forEach { checkpoint ->
+            provider.saveCheckpoint(checkpoint)
+            println("Saved: ${checkpoint.checkpointId}")
         }
+
+        // Get all checkpoints
+        val allCheckpoints = provider.getCheckpoints()
+        println("\nTotal checkpoints: ${allCheckpoints.size}")
+
+        // Get checkpoint count
+        val count = provider.getCheckpointCount()
+        println("Checkpoint count: $count")
+
     }
 
     /**
@@ -161,11 +145,6 @@ object SQLPersistentAgentExample {
         val pgCheckpoint = createSampleCheckpoint("h2-pgcompat-checkpoint")
         pgCompatProvider.saveCheckpoint(pgCheckpoint)
         println("   Saved with PG compatibility: ${pgCheckpoint.checkpointId}")
-
-        // Clean up
-        inMemoryProvider.close()
-        fileProvider.close()
-        pgCompatProvider.close()
     }
 
     /**

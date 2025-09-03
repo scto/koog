@@ -102,9 +102,7 @@ public class H2PersistencyStorageProvider : ExposedPersistencyStorageProvider {
         database = Database.connect(HikariDataSource(hikariConfig)),
         tableName = tableName,
         ttlSeconds = ttlSeconds
-    ) {
-        this.dataSource = HikariDataSource(hikariConfig)
-    }
+    )
 
     /**
      * Creates a provider with an existing HikariDataSource.
@@ -124,11 +122,7 @@ public class H2PersistencyStorageProvider : ExposedPersistencyStorageProvider {
         database = Database.connect(dataSource),
         tableName = tableName,
         ttlSeconds = ttlSeconds
-    ) {
-        this.dataSource = dataSource
-    }
-
-    private var dataSource: HikariDataSource? = null
+    )
 
     /**
      * Companion object for creating various configurations of H2PersistencyStorageProvider.
@@ -215,43 +209,5 @@ public class H2PersistencyStorageProvider : ExposedPersistencyStorageProvider {
                 ttlSeconds = ttlSeconds
             )
         }
-    }
-
-    /**
-     * Closes the data source if it was created by this provider.
-     * Should be called when the provider is no longer needed.
-     */
-    override fun close() {
-        dataSource?.close()
-    }
-
-    /**
-     * Returns connection pool statistics if using HikariCP.
-     * Useful for monitoring connection usage and performance.
-     */
-    public fun getPoolStats(): PoolStats? {
-        return dataSource?.let { ds ->
-            PoolStats(
-                activeConnections = ds.hikariPoolMXBean?.activeConnections ?: 0,
-                idleConnections = ds.hikariPoolMXBean?.idleConnections ?: 0,
-                totalConnections = ds.hikariPoolMXBean?.totalConnections ?: 0,
-                threadsAwaitingConnection = ds.hikariPoolMXBean?.threadsAwaitingConnection ?: 0,
-                maxPoolSize = ds.maximumPoolSize
-            )
-        }
-    }
-
-    /**
-     * Connection pool statistics for monitoring.
-     */
-    public data class PoolStats(
-        val activeConnections: Int,
-        val idleConnections: Int,
-        val totalConnections: Int,
-        val threadsAwaitingConnection: Int,
-        val maxPoolSize: Int
-    ) {
-        val utilizationPercent: Double = (activeConnections.toDouble() / maxPoolSize) * 100
-        val isHighUtilization: Boolean = utilizationPercent > 80.0
     }
 }

@@ -11,16 +11,11 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.jetbrains.exposed.sql.Table
-import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.upsert
-import org.jetbrains.exposed.sql.vendors.H2Dialect
-import org.jetbrains.exposed.sql.vendors.MysqlDialect
-import org.jetbrains.exposed.sql.vendors.PostgreSQLDialect
-import org.jetbrains.exposed.sql.vendors.currentDialect
 
 /**
  * Configuration for TTL cleanup behavior
@@ -105,8 +100,7 @@ public abstract class ExposedPersistencyStorageProvider(
     persistenceId = persistenceId,
     tableName = tableName,
     ttlSeconds = ttlSeconds
-),
-    AutoCloseable {
+) {
 
     /**
      * The Exposed table definition for checkpoints.
@@ -151,28 +145,7 @@ public abstract class ExposedPersistencyStorageProvider(
 
     override suspend fun <T> transaction(block: suspend () -> T): T {
         return newSuspendedTransaction(Dispatchers.IO, database) {
-            applyDialectOptimizations()
             block()
-        }
-    }
-
-    /**
-     * Applies database-specific optimizations based on the current dialect.
-     * This method is called at the beginning of each transaction.
-     */
-    protected open fun Transaction.applyDialectOptimizations() {
-        when (currentDialect) {
-            is PostgreSQLDialect -> {
-                // PostgreSQL: Use READ COMMITTED for better concurrent performance
-                exec("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
-            }
-            is MysqlDialect -> {
-                // MySQL: Ensure we're using READ COMMITTED (default is REPEATABLE READ)
-                exec("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
-            }
-            is H2Dialect -> {
-                // H2: Already uses READ COMMITTED by default
-            }
         }
     }
 
@@ -219,7 +192,6 @@ public abstract class ExposedPersistencyStorageProvider(
     }
 
     override suspend fun getCheckpoints(): List<AgentCheckpointData> {
-        validatePersistenceId()
         conditionalCleanup()
 
         return transaction {
@@ -238,7 +210,6 @@ public abstract class ExposedPersistencyStorageProvider(
     }
 
     override suspend fun saveCheckpoint(agentCheckpointData: AgentCheckpointData) {
-        validatePersistenceId()
         conditionalCleanup()
 
         val checkpointJson = json.encodeToString(agentCheckpointData)
@@ -257,7 +228,6 @@ public abstract class ExposedPersistencyStorageProvider(
     }
 
     override suspend fun getLatestCheckpoint(): AgentCheckpointData? {
-        validatePersistenceId()
         conditionalCleanup()
 
         return transaction {
@@ -277,8 +247,6 @@ public abstract class ExposedPersistencyStorageProvider(
     }
 
     override suspend fun deleteCheckpoint(checkpointId: String) {
-        validatePersistenceId()
-
         transaction {
             checkpointsTable.deleteWhere {
                 (checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId) and
@@ -288,8 +256,6 @@ public abstract class ExposedPersistencyStorageProvider(
     }
 
     override suspend fun deleteAllCheckpoints() {
-        validatePersistenceId()
-
         transaction {
             checkpointsTable.deleteWhere {
                 checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId
@@ -298,21 +264,10 @@ public abstract class ExposedPersistencyStorageProvider(
     }
 
     override suspend fun getCheckpointCount(): Long {
-        validatePersistenceId()
-
         return transaction {
             checkpointsTable.selectAll().where {
                 checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId
             }.count()
         }
-    }
-
-    /**
-     * Closes any resources associated with this provider.
-     * Concrete implementations should override this to close connection pools.
-     */
-    override fun close() {
-        // Base implementation does nothing
-        // Concrete implementations should close their connection pools
     }
 }

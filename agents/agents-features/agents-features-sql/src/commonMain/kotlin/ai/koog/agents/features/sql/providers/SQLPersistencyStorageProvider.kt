@@ -72,16 +72,6 @@ public abstract class SQLPersistencyStorageProvider(
     }
 
     /**
-     * Validates that the persistence ID contains only safe characters for SQL.
-     * This helps prevent SQL injection when persistence ID is used in queries.
-     */
-    protected fun validatePersistenceId() {
-        require(persistenceId.matches(Regex("^[a-zA-Z0-9_.-]+$"))) {
-            "Persistence ID must contain only alphanumeric characters, dots, hyphens, and underscores"
-        }
-    }
-
-    /**
      * Deletes a specific checkpoint by ID
      */
     public abstract suspend fun deleteCheckpoint(checkpointId: String)

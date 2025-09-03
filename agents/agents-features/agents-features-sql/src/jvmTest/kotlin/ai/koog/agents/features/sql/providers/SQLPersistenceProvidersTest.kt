@@ -39,8 +39,6 @@ class SQLPersistenceProvidersTest {
         assertEquals(checkpoint.checkpointId, retrieved.checkpointId)
         assertEquals(checkpoint.nodeId, retrieved.nodeId)
         assertEquals(checkpoint.messageHistory.size, retrieved.messageHistory.size)
-
-        provider.close()
     }
 
     @Test
@@ -66,8 +64,6 @@ class SQLPersistenceProvidersTest {
         // Verify latest
         val latest = provider.getLatestCheckpoint()
         assertEquals("checkpoint-3", latest?.checkpointId)
-
-        provider.close()
     }
 
     @Test
@@ -96,9 +92,6 @@ class SQLPersistenceProvidersTest {
         assertEquals(1, agent2Checkpoints.size)
         assertEquals("agent1-data", agent1Checkpoints[0].checkpointId)
         assertEquals("agent2-data", agent2Checkpoints[0].checkpointId)
-
-        provider1.close()
-        provider2.close()
     }
 
     @Test
@@ -122,8 +115,6 @@ class SQLPersistenceProvidersTest {
         val afterExpiry = provider.getLatestCheckpoint()
         assertNull(afterExpiry)
         assertEquals(0, provider.getCheckpointCount())
-
-        provider.close()
     }
 
     @Test
