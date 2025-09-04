@@ -46,4 +46,5 @@ jobs:
         uses: actions/upload-artifact@master
         with:
           name: demo-android-app
-          path: app/build/outputs/apk/debug/demo-android-app.apk
+          path: app/build/outputs/apk/debug/app.apk
+          #demo-android-app.apk
